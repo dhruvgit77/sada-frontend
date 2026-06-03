@@ -1,3 +1,4 @@
+import React, { useMemo } from 'react';
 import { type Agent } from './Simulation';
 
 type DomainMode = 'abstract' | 'warehouse' | 'evacuation';
@@ -12,16 +13,49 @@ interface SimGridProps {
   onSelectAgent: (id: number) => void;
   onCellMouseDown: (r: number, c: number) => void;
   onCellMouseEnter: (r: number, c: number) => void;
-  heatmap?: number[][];
-  showHeatmap?: boolean;
+  heatmap?: number[][] | null;
+  heatmapMax?: number;
 }
 
-export default function SimGrid({
+function heatColor(normalized: number, alpha: number): string {
+  const n = Math.max(0, Math.min(1, normalized));
+  if (n <= 0.5) {
+    const t = n * 2;
+    const r = Math.round(96 + t * (251 - 96));
+    const g = Math.round(165 + t * (191 - 165));
+    const b = Math.round(250 - t * 250);
+    return `rgba(${r},${g},${b},${alpha})`;
+  } else {
+    const t = (n - 0.5) * 2;
+    const r = Math.round(251 - t * 12);
+    const g = Math.round(191 - t * 191);
+    const b = 0;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+}
+
+const SimGrid = React.memo(function SimGrid({
   agents, grid, step, domainMode,
   showTrails, selectedAgentId, onSelectAgent,
   onCellMouseDown, onCellMouseEnter,
-  heatmap, showHeatmap
+  heatmap, heatmapMax = 1,
 }: SimGridProps) {
+
+  const agentPositions = useMemo(() =>
+    agents.map(a => a.path[Math.min(step, a.path.length - 1)]),
+    [agents, step]
+  );
+
+  const trailSets = useMemo(() => {
+    if (!showTrails) return agents.map(() => new Set<string>());
+    return agents.map(a => {
+      const s = new Set<string>();
+      for (let i = 0; i <= step && i < a.path.length; i++) {
+        s.add(`${a.path[i][0]},${a.path[i][1]}`);
+      }
+      return s;
+    });
+  }, [agents, step, showTrails]);
 
   return (
     <div className="grid-container">
@@ -29,25 +63,25 @@ export default function SimGrid({
         <div key={rIdx} className="grid-row">
           {row.map((cell, cIdx) => {
             const isObstacle = cell === 1;
-            const agentsHere = agents.filter(a => {
-              const pos = a.path[Math.min(step, a.path.length - 1)];
+
+            const agentsHere = agents.filter((_, i) => {
+              const pos = agentPositions[i];
               return pos[0] === rIdx && pos[1] === cIdx;
             });
+
             const goalsHere = agents.filter(a =>
               a.goal[0] === rIdx && a.goal[1] === cIdx
             );
 
-            // Trail cells
             const trailAgents = showTrails && !isObstacle && agentsHere.length === 0
-              ? agents.filter(a =>
-                  a.path.slice(0, step + 1).some(p => p[0] === rIdx && p[1] === cIdx)
-                )
+              ? agents.filter((_, i) => trailSets[i].has(`${rIdx},${cIdx}`))
               : [];
 
-            const heatVal = showHeatmap && heatmap ? heatmap[rIdx][cIdx] : 0;
+            const heatVal = heatmap ? heatmap[rIdx][cIdx] : 0;
+            const normalized = heatmapMax > 0 ? heatVal / heatmapMax : 0;
             const cellStyle = heatVal > 0 ? {
-              backgroundColor: `rgba(239, 68, 68, ${Math.min(heatVal * 0.25, 0.85)})`,
-              boxShadow: `inset 0 0 6px rgba(239, 68, 68, ${Math.min(heatVal * 0.3, 0.9)})`
+              backgroundColor: heatColor(normalized, Math.max(0.15, normalized * 0.85)),
+              boxShadow: `inset 0 0 6px ${heatColor(normalized, Math.min(normalized * 0.9, 0.9))}`,
             } : undefined;
 
             return (
@@ -58,21 +92,16 @@ export default function SimGrid({
                 onMouseEnter={() => onCellMouseEnter(rIdx, cIdx)}
                 style={cellStyle}
               >
-                {/* Heatmap value badge */}
                 {heatVal > 0 && <span className="heatmap-val-badge">{heatVal}</span>}
-                {/* Obstacle skin */}
+
                 {isObstacle && domainMode === 'warehouse' && <span className="cell-emoji">🗄️</span>}
                 {isObstacle && domainMode === 'evacuation' && <span className="cell-emoji">🧱</span>}
 
-                {/* Goal skin */}
                 {!isObstacle && goalsHere.map(g => (
                   <div
                     key={g.id}
                     className="goal-wrapper"
-                    style={{
-                      borderColor: g.color,
-                      boxShadow: `0 0 8px ${g.color}55`
-                    }}
+                    style={{ borderColor: g.color, boxShadow: `0 0 8px ${g.color}55` }}
                   >
                     {domainMode === 'warehouse' ? (
                       <span className="goal-emoji">🚛</span>
@@ -84,7 +113,6 @@ export default function SimGrid({
                   </div>
                 ))}
 
-                {/* Trail dots */}
                 {trailAgents.length > 0 && (
                   <div className="trail-dot-overlay">
                     {trailAgents.map(a => (
@@ -93,7 +121,6 @@ export default function SimGrid({
                   </div>
                 )}
 
-                {/* Agent skin */}
                 {agentsHere.map((a, idx) => {
                   const isSelected = selectedAgentId === a.id;
                   const isDone = a.done && (a.completionStep ?? -1) <= step;
@@ -107,7 +134,7 @@ export default function SimGrid({
                         boxShadow: `0 0 10px ${a.color}aa`,
                         transform: agentsHere.length > 1
                           ? `translate(${(idx - (agentsHere.length - 1) / 2) * 5}px,${(idx - (agentsHere.length - 1) / 2) * 5}px)`
-                          : 'none'
+                          : 'none',
                       }}
                       onClick={e => { e.stopPropagation(); onSelectAgent(a.id); }}
                     >
@@ -122,4 +149,6 @@ export default function SimGrid({
       ))}
     </div>
   );
-}
+});
+
+export default SimGrid;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import './index.css';
 import { simulate, type AgentConfig } from './Simulation';
 import SimGrid from './SimGrid';
@@ -6,6 +6,23 @@ import StatsPanel, { computeStats } from './StatsPanel';
 import Inspector from './Inspector';
 import BatchSandbox from './BatchSandbox';
 import ResultsAnalyzer from './ResultsAnalyzer';
+import SimulationControls from './SimulationControls';
+import TimelineDebugger from './TimelineDebugger';
+import {
+  computeCongestionHeatmap,
+  computeFlipHeatmap,
+  computeCollisionHeatmap,
+  getActiveHeatmap,
+  heatmapMaxVal,
+  type HeatmapMode,
+} from './HeatmapOverlay';
+import {
+  buildFrames,
+  packReplay,
+  saveReplayToJSON,
+  loadReplayFromFile,
+  type ReplayFrame,
+} from './ReplayManager';
 
 const GRID_SIZE = 20;
 type DomainMode = 'abstract' | 'warehouse' | 'evacuation';
@@ -15,7 +32,6 @@ function makeEmptyGrid() {
   return Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
 }
 
-/* ── Preset Environments ───────────────────────────────────────────── */
 const PRESETS = [
   {
     id: 'swap', name: 'Opposite Swap',
@@ -91,114 +107,125 @@ const PRESETS = [
   },
 ];
 
-/* ── App ───────────────────────────────────────────────────────────── */
 export default function App() {
   const [activePresetId, setActivePresetId] = useState('corridor');
-  const [grid, setGrid] = useState(() => PRESETS[1].grid.map(r => [...r]));
-  const [agentsConfig, setAgentsConfig] = useState<AgentConfig[]>(PRESETS[1].agents);
+  const [grid, setGrid]                     = useState(() => PRESETS[1].grid.map(r => [...r]));
+  const [agentsConfig, setAgentsConfig]     = useState<AgentConfig[]>(PRESETS[1].agents);
 
-  const [beta, setBeta] = useState(8.0);
-  const [historyK, setHistoryK] = useState(5);
-  const [numAgents, setNumAgents] = useState(4);
-  const [speed, setSpeed] = useState(150);
+  const [beta, setBeta]             = useState(8.0);
+  const [historyK, setHistoryK]     = useState(5);
+  const [numAgents, setNumAgents]   = useState(4);
+  const [noiseScale, setNoiseScale] = useState(1.0);
+  const [speed, setSpeed]           = useState(150);
   const [domainMode, setDomainMode] = useState<DomainMode>('warehouse');
   const [showTrails, setShowTrails] = useState(true);
-  const [showHeatmap, setShowHeatmap] = useState(true);
-  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
+  const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>('none');
+  const [selectedAgentId, setSelectedAgentId]   = useState<number | null>(null);
   const [activeSection, setActiveSection] = useState<'sim'|'analytics'|'results'|'explainer'>('sim');
 
-  const [baselineAgents, setBaselineAgents] = useState(simulate(grid, PRESETS[1].agents.slice(0,4), false, 200));
-  const [sadaAgents, setSadaAgents]         = useState(simulate(grid, PRESETS[1].agents.slice(0,4), true,  200));
+  const [baselineAgents, setBaselineAgents] = useState(() =>
+    simulate(grid, PRESETS[1].agents.slice(0,4), false, 200, 1.0)
+  );
+  const [sadaAgents, setSadaAgents] = useState(() =>
+    simulate(grid, PRESETS[1].agents.slice(0,4), true,  200, 1.0)
+  );
 
-  const computeHeatmap = (agents: any[]) => {
-    const hm = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
-    for (const agent of agents) {
-      let prevAction = '';
-      for (let i = 0; i < agent.path.length; i++) {
-        const pos = agent.path[i];
-        let action = 'WAIT';
-        if (i > 0) {
-          const prev = agent.path[i - 1];
-          const dx = pos[0] - prev[0];
-          const dy = pos[1] - prev[1];
-          if (dx === -1 && dy === 0) action = 'UP';
-          else if (dx === 1 && dy === 0) action = 'DOWN';
-          else if (dx === 0 && dy === -1) action = 'LEFT';
-          else if (dx === 0 && dy === 1) action = 'RIGHT';
-        }
-        if (i > 1 && action !== prevAction && action !== 'WAIT' && prevAction !== 'WAIT') {
-          const flipPos = agent.path[i - 1];
-          if (flipPos && flipPos[0] >= 0 && flipPos[0] < GRID_SIZE && flipPos[1] >= 0 && flipPos[1] < GRID_SIZE) {
-            hm[flipPos[0]][flipPos[1]] += 1;
-          }
-        }
-        prevAction = action;
-      }
-    }
-    return hm;
-  };
+  const [baselineFrames, setBaselineFrames] = useState<ReplayFrame[]>(() =>
+    buildFrames(simulate(grid, PRESETS[1].agents.slice(0,4), false, 200, 1.0))
+  );
+  const [sadaFrames, setSadaFrames] = useState<ReplayFrame[]>(() =>
+    buildFrames(simulate(grid, PRESETS[1].agents.slice(0,4), true, 200, 1.0))
+  );
 
-  const baseHeatmap = computeHeatmap(baselineAgents);
-  const sadaHeatmap = computeHeatmap(sadaAgents);
+  const [replayStatus, setReplayStatus] = useState<string>('');
 
-  // INDEPENDENT step counters — each model runs until IT is done
   const [baseStep, setBaseStep] = useState(0);
   const [sadaStep, setSadaStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
   const [isDrawing, setIsDrawing] = useState(false);
-  const [drawType, setDrawType] = useState<number>(1);
+  const [drawType, setDrawType]   = useState<number>(1);
 
-  /* run simulation */
-  const runSim = (g: number[][], cfg: AgentConfig[]) => {
+  /* ── Heatmaps (memoised) ─────────────────────────────────── */
+  const activeAgents  = useMemo(() => baselineAgents.slice(0, numAgents), [baselineAgents, numAgents]);
+  const activeSada    = useMemo(() => sadaAgents.slice(0, numAgents),     [sadaAgents, numAgents]);
+
+  const baseCongestion = useMemo(() => computeCongestionHeatmap(activeAgents), [activeAgents]);
+  const baseFlips      = useMemo(() => computeFlipHeatmap(activeAgents),      [activeAgents]);
+  const baseCollision  = useMemo(() => computeCollisionHeatmap(activeAgents), [activeAgents]);
+
+  const sadaCongestion = useMemo(() => computeCongestionHeatmap(activeSada), [activeSada]);
+  const sadaFlipMap    = useMemo(() => computeFlipHeatmap(activeSada),       [activeSada]);
+  const sadaCollision  = useMemo(() => computeCollisionHeatmap(activeSada),  [activeSada]);
+
+  const baseHeatmap = useMemo(
+    () => getActiveHeatmap(heatmapMode, baseCongestion, baseFlips, baseCollision),
+    [heatmapMode, baseCongestion, baseFlips, baseCollision]
+  );
+  const sadaHeatmap = useMemo(
+    () => getActiveHeatmap(heatmapMode, sadaCongestion, sadaFlipMap, sadaCollision),
+    [heatmapMode, sadaCongestion, sadaFlipMap, sadaCollision]
+  );
+
+  const baseHeatmapMax = useMemo(() => heatmapMaxVal(baseHeatmap), [baseHeatmap]);
+  const sadaHeatmapMax = useMemo(() => heatmapMaxVal(sadaHeatmap), [sadaHeatmap]);
+
+  /* ── Stats ────────────────────────────────────────────────── */
+  const baseStats = useMemo(() => computeStats(activeAgents), [activeAgents]);
+  const sadaStats = useMemo(() => computeStats(activeSada),   [activeSada]);
+
+  const baseMax   = baselineAgents.length ? baselineAgents[0].path.length - 1 : 0;
+  const sadaMax   = sadaAgents.length     ? sadaAgents[0].path.length - 1     : 0;
+  const globalMax = Math.max(baseMax, sadaMax);
+
+  /* ── Run Simulation ───────────────────────────────────────── */
+  const runSim = useCallback((g: number[][], cfg: AgentConfig[]) => {
     const active = cfg.slice(0, numAgents).map(c => ({ ...c, beta, K: historyK }));
-    setBaselineAgents(simulate(g, active, false, 200));
-    setSadaAgents(simulate(g, active, true, 200));
-    setBaseStep(0); setSadaStep(0); setIsPlaying(false);
-  };
+    const base = simulate(g, active, false, 200, noiseScale);
+    const sada = simulate(g, active, true,  200, noiseScale);
+    setBaselineAgents(base);
+    setSadaAgents(sada);
+    setBaselineFrames(buildFrames(base));
+    setSadaFrames(buildFrames(sada));
+    setBaseStep(0);
+    setSadaStep(0);
+    setIsPlaying(false);
+    setReplayStatus('');
+  }, [numAgents, beta, historyK, noiseScale]);
 
   useEffect(() => { runSim(grid, agentsConfig); }, []);
 
-  /* animation — each step counter stops independently */
+  /* ── Animation Loop ───────────────────────────────────────── */
   useEffect(() => {
     if (!isPlaying) return;
-    const baseMax = baselineAgents.length ? baselineAgents[0].path.length - 1 : 0;
-    const sadaMax  = sadaAgents.length    ? sadaAgents[0].path.length - 1    : 0;
     if (baseStep >= baseMax && sadaStep >= sadaMax) { setIsPlaying(false); return; }
     const id = setInterval(() => {
       setBaseStep(s => s < baseMax ? s + 1 : s);
       setSadaStep(s => s < sadaMax ? s + 1 : s);
     }, speed);
     return () => clearInterval(id);
-  }, [isPlaying, speed, baseStep, sadaStep, baselineAgents, sadaAgents]);
+  }, [isPlaying, speed, baseStep, sadaStep, baseMax, sadaMax]);
 
-  /* preset load */
-  const loadPreset = (pid: string) => {
+  /* ── Preset Load ──────────────────────────────────────────── */
+  const loadPreset = useCallback((pid: string) => {
     const p = PRESETS.find(p => p.id === pid)!;
     setActivePresetId(pid);
     const g = p.grid.map(r => [...r]);
     setGrid(g);
     setAgentsConfig(p.agents);
     setNumAgents(Math.min(p.agents.length, numAgents));
-    runSim(g, p.agents);
-  };
+    const active = p.agents.slice(0, Math.min(p.agents.length, numAgents)).map(c => ({ ...c, beta, K: historyK }));
+    const base = simulate(g, active, false, 200, noiseScale);
+    const sada = simulate(g, active, true,  200, noiseScale);
+    setBaselineAgents(base);
+    setSadaAgents(sada);
+    setBaselineFrames(buildFrames(base));
+    setSadaFrames(buildFrames(sada));
+    setBaseStep(0); setSadaStep(0); setIsPlaying(false);
+  }, [numAgents, beta, historyK, noiseScale]);
 
-  /* map painting */
-  const handleCellDown = (r: number, c: number) => {
-    const blocked = agentsConfig.some(a =>
-      (a.start[0]===r&&a.start[1]===c)||(a.goal[0]===r&&a.goal[1]===c)
-    );
-    if (blocked) return;
-    const t = grid[r][c]===1 ? 0 : 1;
-    setDrawType(t);
-    setIsDrawing(true);
-    paintCell(r, c, t);
-  };
-  const handleCellEnter = (r: number, c: number) => {
-    if (!isDrawing) return;
-    paintCell(r, c, drawType);
-  };
-  const paintCell = (r: number, c: number, t: number) => {
+  /* ── Map Painting ─────────────────────────────────────────── */
+  const paintCell = useCallback((r: number, c: number, t: number) => {
     const blocked = agentsConfig.some(a =>
       (a.start[0]===r&&a.start[1]===c)||(a.goal[0]===r&&a.goal[1]===c)
     );
@@ -208,23 +235,80 @@ export default function App() {
       next[r][c] = t;
       return next;
     });
-  };
-  const handleMouseUp = () => {
-    if (isDrawing) { setIsDrawing(false); runSim(grid, agentsConfig); }
-  };
+  }, [agentsConfig]);
 
-  const baseStats = computeStats(baselineAgents);
-  const sadaStats = computeStats(sadaAgents);
-  const baseMax = baselineAgents.length ? baselineAgents[0].path.length - 1 : 0;
-  const sadaMax = sadaAgents.length    ? sadaAgents[0].path.length - 1    : 0;
-  const globalMax = Math.max(baseMax, sadaMax);
+  const handleCellDown = useCallback((r: number, c: number) => {
+    const blocked = agentsConfig.some(a =>
+      (a.start[0]===r&&a.start[1]===c)||(a.goal[0]===r&&a.goal[1]===c)
+    );
+    if (blocked) return;
+    const t = grid[r][c] === 1 ? 0 : 1;
+    setDrawType(t);
+    setIsDrawing(true);
+    paintCell(r, c, t);
+  }, [agentsConfig, grid, paintCell]);
 
-  /* scrubber syncs both */
-  const handleScrub = (v: number) => {
+  const handleCellEnter = useCallback((r: number, c: number) => {
+    if (!isDrawing) return;
+    paintCell(r, c, drawType);
+  }, [isDrawing, drawType, paintCell]);
+
+  const handleMouseUp = useCallback(() => {
+    if (isDrawing) {
+      setIsDrawing(false);
+      setGrid(prev => {
+        runSim(prev, agentsConfig);
+        return prev;
+      });
+    }
+  }, [isDrawing, agentsConfig, runSim]);
+
+  /* ── Scrubber ─────────────────────────────────────────────── */
+  const handleScrub = useCallback((v: number) => {
     setSadaStep(Math.min(v, sadaMax));
     setBaseStep(Math.min(v, baseMax));
     setIsPlaying(false);
-  };
+  }, [sadaMax, baseMax]);
+
+  const handleStepForward = useCallback(() => {
+    setBaseStep(s => Math.min(s + 1, baseMax));
+    setSadaStep(s => Math.min(s + 1, sadaMax));
+    setIsPlaying(false);
+  }, [baseMax, sadaMax]);
+
+  const handleStepBack = useCallback(() => {
+    setBaseStep(s => Math.max(s - 1, 0));
+    setSadaStep(s => Math.max(s - 1, 0));
+    setIsPlaying(false);
+  }, []);
+
+  /* ── Replay ───────────────────────────────────────────────── */
+  const handleSaveBaseReplay = useCallback(() => {
+    const active = agentsConfig.slice(0, numAgents).map(c => ({ ...c, beta, K: historyK }));
+    const data = packReplay(simulate(grid, active, false, 200, noiseScale), false, beta, historyK);
+    saveReplayToJSON(data);
+  }, [agentsConfig, numAgents, beta, historyK, grid, noiseScale]);
+
+  const handleSaveSadaReplay = useCallback(() => {
+    const active = agentsConfig.slice(0, numAgents).map(c => ({ ...c, beta, K: historyK }));
+    const data = packReplay(simulate(grid, active, true, 200, noiseScale), true, beta, historyK);
+    saveReplayToJSON(data);
+  }, [agentsConfig, numAgents, beta, historyK, grid, noiseScale]);
+
+  const handleLoadReplay = useCallback(async () => {
+    setReplayStatus('Loading…');
+    const data = await loadReplayFromFile();
+    if (!data) { setReplayStatus('❌ Invalid replay file'); return; }
+    setReplayStatus(`✓ Loaded ${data.isSada ? 'SADA' : 'Baseline'} replay — ${data.totalSteps} steps, β=${data.beta}, K=${data.historyK}`);
+  }, []);
+
+  /* ── Inline stats for grid panels ───────────────────────────── */
+  const baseFlipCount = useMemo(
+    () => activeAgents.reduce((s, a) => s + a.flips, 0), [activeAgents]
+  );
+  const sadaFlipCount = useMemo(
+    () => activeSada.reduce((s, a) => s + a.flips, 0), [activeSada]
+  );
 
   return (
     <div className="app" onMouseUp={handleMouseUp}>
@@ -235,20 +319,26 @@ export default function App() {
           <div className="hero-logo">SADA</div>
           <div>
             <h1 className="hero-title">Stability-Aware Decision Algorithm</h1>
-            <p className="hero-sub">Solving multi-agent congestion through temporal stability — applied to <strong>{domainMode === 'warehouse' ? 'Warehouse Logistics' : domainMode === 'evacuation' ? 'Emergency Evacuation' : 'Abstract Grid'}</strong></p>
+            <p className="hero-sub">
+              Solving multi-agent congestion through temporal stability — applied to{' '}
+              <strong>{domainMode === 'warehouse' ? 'Warehouse Logistics' : domainMode === 'evacuation' ? 'Emergency Evacuation' : 'Abstract Grid'}</strong>
+            </p>
           </div>
         </div>
-
         <div className="domain-tabs">
           {(['abstract','warehouse','evacuation'] as DomainMode[]).map(d => (
-            <button key={d} className={`domain-tab${domainMode===d?' active':''}`} onClick={() => setDomainMode(d)}>
+            <button
+              key={d}
+              className={`domain-tab${domainMode===d?' active':''}`}
+              onClick={() => setDomainMode(d)}
+            >
               {d==='abstract'?'📐 Grid':d==='warehouse'?'🤖 Warehouse':'🚪 Evacuation'}
             </button>
           ))}
         </div>
       </header>
 
-      {/* ── Problem Banner (contextual) ──────────────────────────── */}
+      {/* ── Problem Banner ────────────────────────────────────────── */}
       <div className={`problem-banner ${domainMode}`}>
         {domainMode === 'warehouse' && <>
           <span className="banner-icon">⚡</span>
@@ -261,7 +351,7 @@ export default function App() {
           <span className="banner-icon">🚨</span>
           <div>
             <strong>Real Problem: Panic Turbulence in Emergency Evacuations</strong>
-            <p>Crowd simulation studies show that indecisive agents (those constantly changing direction) block corridors and reduce safe-egress throughput by up to 40%. SADA enforces decisive, smooth movement even under congestion.</p>
+            <p>Crowd simulation studies show that indecisive agents constantly changing direction block corridors and reduce safe-egress throughput by up to 40%. SADA enforces decisive, smooth movement even under congestion.</p>
           </div>
         </>}
         {domainMode === 'abstract' && <>
@@ -273,10 +363,14 @@ export default function App() {
         </>}
       </div>
 
-      {/* ── Nav tabs ────────────────────────────────────────────── */}
+      {/* ── Nav Tabs ──────────────────────────────────────────────── */}
       <nav className="section-nav">
         {(['sim','analytics','results','explainer'] as const).map(s => (
-          <button key={s} className={`nav-btn${activeSection===s?' active':''}`} onClick={() => setActiveSection(s)}>
+          <button
+            key={s}
+            className={`nav-btn${activeSection===s?' active':''}`}
+            onClick={() => setActiveSection(s)}
+          >
             {s==='sim'?'🎮 Live Simulation':s==='analytics'?'📊 Performance Analytics':s==='results'?'📈 Results Analysis':'🧠 Algorithm Explainer'}
           </button>
         ))}
@@ -287,63 +381,30 @@ export default function App() {
       ══════════════════════════════════════════════════════════ */}
       {activeSection === 'sim' && (
         <div className="sim-section">
+
+          {/* ── Left Sidebar ────────────────────────────────────── */}
           <div className="sidebar">
-            <div className="sidebar-card">
-              <div className="sidebar-title">⚙️ Parameters</div>
+            <SimulationControls
+              activePresetId={activePresetId}
+              presets={PRESETS}
+              onLoadPreset={loadPreset}
+              beta={beta}
+              onBeta={setBeta}
+              historyK={historyK}
+              onHistoryK={setHistoryK}
+              numAgents={numAgents}
+              onNumAgents={setNumAgents}
+              noiseScale={noiseScale}
+              onNoiseScale={setNoiseScale}
+              agentsConfig={agentsConfig}
+              showTrails={showTrails}
+              onShowTrails={setShowTrails}
+              heatmapMode={heatmapMode}
+              onHeatmapMode={setHeatmapMode}
+              onRecalculate={() => runSim(grid, agentsConfig)}
+            />
 
-              <label className="field-label">Environment</label>
-              <select className="field-select" value={activePresetId} onChange={e => loadPreset(e.target.value)}>
-                {PRESETS.map(p => <option key={p.id} value={p.id}>{p.icon} {p.name}</option>)}
-              </select>
-              <p className="field-hint">{PRESETS.find(p=>p.id===activePresetId)?.description}</p>
-
-              <div className="divider" />
-
-              <div className="slider-row">
-                <label>Stability Penalty β</label>
-                <span className="slider-val">{beta.toFixed(1)}</span>
-              </div>
-              <input type="range" min="0" max="30" step="0.5" value={beta}
-                onChange={e => setBeta(parseFloat(e.target.value))} />
-              <p className="field-hint">Higher = stronger jitter suppression (may deadlock at extremes)</p>
-
-              <div className="slider-row">
-                <label>History Window K</label>
-                <span className="slider-val">{historyK}</span>
-              </div>
-              <input type="range" min="2" max="15" step="1" value={historyK}
-                onChange={e => setHistoryK(parseInt(e.target.value))} />
-
-              <div className="slider-row">
-                <label>Agent Count</label>
-                <span className="slider-val">{numAgents}</span>
-              </div>
-              <input type="range" min="1" max={agentsConfig.length} step="1" value={numAgents}
-                onChange={e => setNumAgents(parseInt(e.target.value))} />
-
-              <div className="divider" />
-
-              <label className="toggle-label">
-                <input type="checkbox" checked={showTrails} onChange={e => setShowTrails(e.target.checked)} />
-                <span className="toggle-track"><span className="toggle-thumb" /></span>
-                Show Path Trails
-              </label>
-
-              <label className="toggle-label" style={{ marginTop: '0.5rem' }}>
-                <input type="checkbox" checked={showHeatmap} onChange={e => setShowHeatmap(e.target.checked)} />
-                <span className="toggle-track"><span className="toggle-thumb" /></span>
-                Show Jitter Heatmap
-              </label>
-
-              <button className="btn-primary" onClick={() => runSim(grid, agentsConfig)}>
-                ↺ Recalculate
-              </button>
-              <p className="field-hint" style={{marginTop:'0.5rem'}}>
-                💡 <strong>Map Editor:</strong> Click/drag on grids to paint walls
-              </p>
-            </div>
-
-            {/* Live completion status */}
+            {/* Completion Status Card */}
             <div className="sidebar-card status-card">
               <div className="sidebar-title">🏁 Completion Status</div>
               <div className="status-row">
@@ -361,7 +422,7 @@ export default function App() {
                 <span className="progress-pct">{sadaMax>0?Math.round((sadaStep/sadaMax)*100):0}%</span>
               </div>
               <div className="agent-statuses">
-                {baselineAgents.slice(0,numAgents).map(a => {
+                {baselineAgents.slice(0, numAgents).map(a => {
                   const baseDone = a.done && (a.completionStep??-1) <= baseStep;
                   const sA = sadaAgents.find(s=>s.id===a.id);
                   const sadaDone = sA?.done && (sA.completionStep??-1) <= sadaStep;
@@ -376,40 +437,76 @@ export default function App() {
                 })}
               </div>
             </div>
+
+            {/* Replay Card */}
+            <div className="sidebar-card replay-card">
+              <div className="sidebar-title">💾 Replay System</div>
+              <p className="field-hint" style={{marginBottom:'0.75rem'}}>
+                Export the full frame-by-frame simulation log or import a saved replay.
+              </p>
+              <div className="replay-btn-group">
+                <button className="btn-secondary replay-btn" onClick={handleSaveBaseReplay}>
+                  ⬇ Save Baseline
+                </button>
+                <button className="btn-secondary replay-btn" onClick={handleSaveSadaReplay}>
+                  ⬇ Save SADA
+                </button>
+              </div>
+              <button className="btn-secondary" style={{width:'100%', marginTop:'0.5rem'}} onClick={handleLoadReplay}>
+                📂 Load Replay File
+              </button>
+              {replayStatus && (
+                <p className={`replay-status${replayStatus.startsWith('✓') ? ' success' : ''}`}>
+                  {replayStatus}
+                </p>
+              )}
+            </div>
           </div>
 
+          {/* ── Main Simulation Area ─────────────────────────────── */}
           <div className="sim-main">
-            {/* Playback controls */}
+            {/* Playback Controls Bar */}
             <div className="controls-bar">
-              <button className={`ctrl-btn ${isPlaying?'pause':'play'}`} onClick={() => setIsPlaying(!isPlaying)}>
+              <button
+                className={`ctrl-btn ${isPlaying?'pause':'play'}`}
+                onClick={() => setIsPlaying(!isPlaying)}
+              >
                 {isPlaying ? '⏸ Pause' : '▶ Play'}
               </button>
-              <button className="ctrl-btn reset" onClick={() => { setBaseStep(0); setSadaStep(0); setIsPlaying(false); }}>⟳ Reset</button>
+              <button
+                className="ctrl-btn reset"
+                onClick={() => { setBaseStep(0); setSadaStep(0); setIsPlaying(false); }}
+              >
+                ⟳ Reset
+              </button>
               <div className="speed-row">
                 <span>Speed</span>
-                <input type="range" min="50" max="500" step="25" value={550-speed}
-                  onChange={e => setSpeed(550-parseInt(e.target.value))} style={{direction:'rtl',width:'80px'}} />
+                <input
+                  type="range" min="50" max="500" step="25" value={550-speed}
+                  onChange={e => setSpeed(550-parseInt(e.target.value))}
+                  style={{direction:'rtl', width:'80px'}}
+                />
               </div>
-              <div className="scrubber-row">
-                <span>Scrub</span>
-                <input type="range" min="0" max={globalMax} value={Math.max(baseStep, sadaStep)}
-                  onChange={e => handleScrub(parseInt(e.target.value))} className="scrubber" />
+              <div className="ctrl-bar-right">
                 <span className="step-lbl">
                   B:<strong>{baseStep}</strong>/{baseMax} &nbsp; S:<strong>{sadaStep}</strong>/{sadaMax}
                 </span>
+                {baseStep >= baseMax && sadaStep >= sadaMax && (
+                  <span className="done-inline-badge">✓ Complete</span>
+                )}
               </div>
             </div>
 
-            {/* Grids side by side */}
+            {/* Grids Side by Side */}
             <div className="grids-row">
               <div className="sim-panel baseline-panel">
                 <div className="panel-header">
                   <span className="panel-title">Baseline (Greedy)</span>
-                  <span className="panel-badge base-badge">No Stability Cost</span>
+                  <span className="panel-badge base-badge">NO STABILITY COST</span>
                   {baseStep >= baseMax && <span className="done-chip">✓ DONE</span>}
                 </div>
                 <SimGrid
-                  agents={baselineAgents.slice(0,numAgents)}
+                  agents={activeAgents}
                   grid={grid}
                   step={baseStep}
                   domainMode={domainMode}
@@ -419,10 +516,10 @@ export default function App() {
                   onCellMouseDown={handleCellDown}
                   onCellMouseEnter={handleCellEnter}
                   heatmap={baseHeatmap}
-                  showHeatmap={showHeatmap}
+                  heatmapMax={baseHeatmapMax}
                 />
                 <div className="inline-stats">
-                  <span>Flips: <strong className="danger">{baselineAgents.slice(0,numAgents).reduce((s,a)=>s+a.flips,0)}</strong></span>
+                  <span>Flips: <strong className="danger">{baseFlipCount}</strong></span>
                   <span>Smooth: <strong>{baseStats.smoothness.toFixed(0)}%</strong></span>
                   <span>Energy: <strong>{baseStats.energy} Wh</strong></span>
                 </div>
@@ -437,7 +534,7 @@ export default function App() {
                   {sadaStep >= sadaMax && <span className="done-chip">✓ DONE</span>}
                 </div>
                 <SimGrid
-                  agents={sadaAgents.slice(0,numAgents)}
+                  agents={activeSada}
                   grid={grid}
                   step={sadaStep}
                   domainMode={domainMode}
@@ -447,17 +544,34 @@ export default function App() {
                   onCellMouseDown={handleCellDown}
                   onCellMouseEnter={handleCellEnter}
                   heatmap={sadaHeatmap}
-                  showHeatmap={showHeatmap}
+                  heatmapMax={sadaHeatmapMax}
                 />
                 <div className="inline-stats">
-                  <span>Flips: <strong className="success">{sadaAgents.slice(0,numAgents).reduce((s,a)=>s+a.flips,0)}</strong></span>
+                  <span>Flips: <strong className="success">{sadaFlipCount}</strong></span>
                   <span>Smooth: <strong className="success">{sadaStats.smoothness.toFixed(0)}%</strong></span>
                   <span>Energy: <strong className="success">{sadaStats.energy} Wh</strong></span>
                 </div>
               </div>
             </div>
 
-            {/* Inspector */}
+            {/* Time Travel Debugger */}
+            <TimelineDebugger
+              baseStep={baseStep}
+              sadaStep={sadaStep}
+              globalMax={globalMax}
+              baseMax={baseMax}
+              sadaMax={sadaMax}
+              onScrub={handleScrub}
+              onStepForward={handleStepForward}
+              onStepBack={handleStepBack}
+              selectedAgentId={selectedAgentId}
+              baselineAgents={activeAgents}
+              sadaAgents={activeSada}
+              baselineFrames={baselineFrames}
+              sadaFrames={sadaFrames}
+            />
+
+            {/* Decision Cost Inspector */}
             <div className="inspector-card">
               <div className="inspector-title">🔍 Agent Decision Cost Inspector</div>
               <Inspector
@@ -487,9 +601,7 @@ export default function App() {
       {/* ══════════════════════════════════════════════════════════
           SECTION 3: RESULTS ANALYSIS
       ══════════════════════════════════════════════════════════ */}
-      {activeSection === 'results' && (
-        <ResultsAnalyzer />
-      )}
+      {activeSection === 'results' && <ResultsAnalyzer />}
 
       {/* ══════════════════════════════════════════════════════════
           SECTION 4: ALGORITHM EXPLAINER

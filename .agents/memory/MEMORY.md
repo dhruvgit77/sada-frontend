@@ -1,0 +1,2 @@
+- [SADA noiseScale scope fix](sada-noiseScale-scope.md) — noiseScale must be passed as a param to Agent.step(), not just simulate(); scope does not penetrate class methods.
+- [SADA component architecture](sada-architecture.md) — new components: HeatmapOverlay, TimelineDebugger, SimulationControls, ReplayManager; StatsPanel exports computeStats as named export.

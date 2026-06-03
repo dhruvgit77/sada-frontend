@@ -73,7 +73,7 @@ export class Agent {
     return flips;
   }
 
-  step(grid: number[][], otherAgents: Agent[], prng: PRNG) {
+  step(grid: number[][], otherAgents: Agent[], prng: PRNG, noiseScale = 1.0) {
     if (this.pos[0] === this.goal[0] && this.pos[1] === this.goal[1]) {
       if (!this.done) {
         this.done = true;
@@ -108,7 +108,7 @@ export class Agent {
       }
 
       // Deterministic noise ensuring Baseline/SADA see exact identical values
-      const noise = prng.next() * 0.5;
+      const noise = prng.next() * 0.5 * noiseScale;
       const waitPenalty = action.name === 'WAIT' ? 2.0 : 0;
       
       let stabCost = 0;
@@ -137,7 +137,7 @@ export class Agent {
   }
 }
 
-export function simulate(grid: number[][], config: AgentConfig[], use_sada: boolean, maxSteps = 150) {
+export function simulate(grid: number[][], config: AgentConfig[], use_sada: boolean, maxSteps = 150, noiseScale = 1.0) {
   const agents = config.map(c => new Agent(c, use_sada));
 
   // Initialize PRNG with the exact same seed for every single run
@@ -156,7 +156,7 @@ export function simulate(grid: number[][], config: AgentConfig[], use_sada: bool
     for (const i of indices) {
       if (!agents[i].done) {
         allDone = false;
-        agents[i].step(grid, agents.filter(a => a.id !== agents[i].id), prng);
+        agents[i].step(grid, agents.filter(a => a.id !== agents[i].id), prng, noiseScale);
       }
     }
     

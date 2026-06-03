@@ -1,0 +1,358 @@
+You are working on an existing React + TypeScript project called SADA (Stability-Aware Decision Algorithm).
+
+IMPORTANT:
+
+Before writing code, thoroughly inspect the entire codebase and understand the existing architecture.
+
+Do NOT rewrite the project from scratch.
+
+Do NOT replace working SADA logic.
+
+Do NOT remove existing functionality.
+
+Extend the current implementation while preserving all current behavior.
+
+==================================================
+PROJECT GOAL
+============
+
+Upgrade the current SADA simulator into a research-grade interactive visualization platform.
+
+The existing project already contains:
+
+* Baseline algorithm
+* SADA algorithm
+* Agent simulation
+* Grid rendering
+* Metrics
+* Inspector
+* Batch testing
+* Results analysis
+
+Your task is to implement the Tier-1 feature set and integrate it cleanly into the existing architecture.
+
+==================================================
+PHASE 0 — CODEBASE ANALYSIS
+===========================
+
+First:
+
+1. Inspect all files.
+2. Understand current state management.
+3. Identify simulation loop.
+4. Identify agent model.
+5. Identify metric calculations.
+6. Identify visualization components.
+7. Identify reusable logic.
+
+Before making changes:
+
+Create an implementation plan describing:
+
+* Files to modify
+* Files to create
+* State changes required
+* Data structures required
+
+Then proceed.
+
+==================================================
+FEATURE 1 — SPLIT SCREEN COMPARISON MODE
+========================================
+
+Create a new Comparison Mode.
+
+Run:
+
+LEFT PANEL:
+Baseline simulation
+
+RIGHT PANEL:
+SADA simulation
+
+Requirements:
+
+* Same map
+* Same obstacles
+* Same seed
+* Same agent positions
+* Same goals
+
+Controls affect both simulations simultaneously:
+
+* Play
+* Pause
+* Reset
+* Step Forward
+
+Synchronization is mandatory.
+
+Add comparison metrics:
+
+* Flips
+* Success Rate
+* Path Length
+* Smoothness
+* Energy
+* Completion Time
+
+Visually indicate:
+
+* Better
+* Worse
+* Equal
+
+==================================================
+FEATURE 2 — REPLAY SYSTEM
+=========================
+
+Implement a complete replay architecture.
+
+Record every timestep.
+
+Replay frame structure:
+
+{
+step,
+agentPositions,
+agentActions,
+agentCosts,
+metrics
+}
+
+Requirements:
+
+* Exact deterministic replay
+* Save replay to JSON
+* Load replay from JSON
+* Replay must reproduce original run
+
+Controls:
+
+* Play
+* Pause
+* Restart
+* Previous
+* Next
+
+Replay mode should not modify simulation state.
+
+==================================================
+FEATURE 3 — TIME TRAVEL DEBUGGER
+================================
+
+Add a timeline system.
+
+Requirements:
+
+* Slider from Step 0 to Final Step
+* Instant navigation
+* No lag
+* Works after simulation completion
+* Works during replay
+
+Display:
+
+Current Step
+Total Steps
+
+When an agent is selected:
+
+Show historical state for that timestep:
+
+* Position
+* Chosen Action
+* Distance Cost
+* Collision Cost
+* Stability Cost
+* Noise
+* Total Cost
+
+==================================================
+FEATURE 4 — HEATMAP SYSTEM
+==========================
+
+Implement overlay visualization modes.
+
+Mode A:
+Congestion Heatmap
+
+Count visits per cell.
+
+Mode B:
+Flip Heatmap
+
+Count flip events per cell.
+
+Mode C:
+Collision Risk Heatmap
+
+Count near-collision events.
+
+Visualization:
+
+Low intensity → blue
+Medium intensity → yellow
+High intensity → red
+
+Add UI controls:
+
+None
+Congestion
+Flips
+Collision Risk
+
+Overlay must render efficiently.
+
+==================================================
+FEATURE 5 — LIVE PARAMETER CONTROLS
+===================================
+
+Create a control panel.
+
+Add:
+
+Beta Slider
+
+Range:
+0 to 20
+
+Step:
+0.5
+
+History Length K
+
+Range:
+1 to 15
+
+Agent Count
+
+Range:
+1 to 50
+
+Noise
+
+Range:
+0 to 2
+
+Obstacle Density
+
+Range:
+0 to 40%
+
+Requirements:
+
+* Live updates
+* Regenerate environment on reset
+* Display current values
+
+==================================================
+FEATURE 6 — PERFORMANCE
+=======================
+
+Maintain responsiveness.
+
+Target:
+
+* Smooth rendering
+* Fast simulation updates
+* No excessive rerenders
+
+Use:
+
+* React.memo
+* useMemo
+* useCallback
+
+Optimize heatmap rendering.
+
+Optimize replay rendering.
+
+==================================================
+FEATURE 7 — UI LAYOUT
+=====================
+
+Create a professional dashboard.
+
+Layout:
+
+TOP:
+Global Metrics
+
+LEFT:
+Controls
+
+CENTER:
+Simulation Area
+
+RIGHT:
+Inspector
+
+BOTTOM:
+Replay + Timeline
+
+Responsive desktop design.
+
+Maintain visual consistency with existing styling.
+
+==================================================
+FEATURE 8 — NEW FILES
+=====================
+
+Create clean modular components where appropriate:
+
+ComparisonView.tsx
+
+ReplayManager.ts
+
+TimelineDebugger.tsx
+
+HeatmapOverlay.tsx
+
+SimulationControls.tsx
+
+Reuse existing code wherever possible.
+
+==================================================
+FEATURE 9 — VALIDATION
+======================
+
+After implementation:
+
+Verify:
+
+✓ TypeScript compiles successfully
+
+✓ Existing simulations still work
+
+✓ Baseline still behaves identically
+
+✓ SADA still behaves identically
+
+✓ Replay reproduces simulation exactly
+
+✓ Heatmaps update correctly
+
+✓ Comparison mode stays synchronized
+
+✓ No TypeScript errors
+
+✓ No runtime errors
+
+==================================================
+FINAL OUTPUT
+============
+
+Provide:
+
+1. Summary of architecture changes
+
+2. New files created
+
+3. Existing files modified
+
+4. Validation results
+
+5. Any recommended future enhancements
+
+The final result should feel like a polished research visualization platform suitable for a final-year project, research demonstration, or publication showcase.
