@@ -5,6 +5,7 @@ import SimGrid from './SimGrid';
 import StatsPanel, { computeStats } from './StatsPanel';
 import Inspector from './Inspector';
 import BatchSandbox from './BatchSandbox';
+import ResultsAnalyzer from './ResultsAnalyzer';
 
 const GRID_SIZE = 20;
 type DomainMode = 'abstract' | 'warehouse' | 'evacuation';
@@ -104,7 +105,7 @@ export default function App() {
   const [showTrails, setShowTrails] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
-  const [activeSection, setActiveSection] = useState<'sim'|'analytics'|'explainer'>('sim');
+  const [activeSection, setActiveSection] = useState<'sim'|'analytics'|'results'|'explainer'>('sim');
 
   const [baselineAgents, setBaselineAgents] = useState(simulate(grid, PRESETS[1].agents.slice(0,4), false, 200));
   const [sadaAgents, setSadaAgents]         = useState(simulate(grid, PRESETS[1].agents.slice(0,4), true,  200));
@@ -274,9 +275,9 @@ export default function App() {
 
       {/* ── Nav tabs ────────────────────────────────────────────── */}
       <nav className="section-nav">
-        {(['sim','analytics','explainer'] as const).map(s => (
+        {(['sim','analytics','results','explainer'] as const).map(s => (
           <button key={s} className={`nav-btn${activeSection===s?' active':''}`} onClick={() => setActiveSection(s)}>
-            {s==='sim'?'🎮 Live Simulation':s==='analytics'?'📊 Performance Analytics':'🧠 Algorithm Explainer'}
+            {s==='sim'?'🎮 Live Simulation':s==='analytics'?'📊 Performance Analytics':s==='results'?'📈 Results Analysis':'🧠 Algorithm Explainer'}
           </button>
         ))}
       </nav>
@@ -484,7 +485,14 @@ export default function App() {
       )}
 
       {/* ══════════════════════════════════════════════════════════
-          SECTION 3: ALGORITHM EXPLAINER
+          SECTION 3: RESULTS ANALYSIS
+      ══════════════════════════════════════════════════════════ */}
+      {activeSection === 'results' && (
+        <ResultsAnalyzer />
+      )}
+
+      {/* ══════════════════════════════════════════════════════════
+          SECTION 4: ALGORITHM EXPLAINER
       ══════════════════════════════════════════════════════════ */}
       {activeSection === 'explainer' && (
         <div className="explainer-section">
