@@ -661,6 +661,21 @@ export default function App() {
             <h2>Trade-off: Stability vs Optimality</h2>
             <p>Higher β values produce smoother paths but can slightly increase total path length (agents detour rather than wait and jitter). The synopsis target is <strong>&lt;15% path overhead</strong> while achieving <strong>&gt;90% success rate</strong> — both achievable in the default β=8 configuration. Use the Live Simulation tab to tune β and observe the trade-off in real time.</p>
           </div>
+
+          <div className="explainer-card">
+            <h2>Time & Space Complexity Analysis</h2>
+            <p><strong>Time Complexity</strong></p>
+            <ul style={{ marginLeft: '1.5rem', marginBottom: '1rem', lineHeight: '1.6' }}>
+              <li><strong>Single Agent Step:</strong> <code>O(|A| × K)</code> — effectively <strong><code>O(1)</code></strong> since possible actions <code>|A|</code> (5) and history length <code>K</code> are small constants.</li>
+              <li><strong>Single Simulation Step:</strong> <strong><code>O(N × K)</code></strong> — scales linearly with the number of agents <code>N</code>.</li>
+              <li><strong>Full Simulation:</strong> <strong><code>O(T × N × K)</code></strong> where <code>T</code> is the maximum number of simulation steps.</li>
+            </ul>
+            <p><strong>Space Complexity</strong></p>
+            <ul style={{ marginLeft: '1.5rem', marginBottom: '1rem', lineHeight: '1.6' }}>
+              <li><strong>Total Space:</strong> <strong><code>O(G + N × (K + T))</code></strong> where <code>G</code> is the grid size. Memory usage is highly efficient and bounded by the path trajectories.</li>
+            </ul>
+            <p><strong>Conclusion:</strong> SADA's performance overhead scales linearly identically to a baseline greedy approach (<code>O(N)</code>), making it highly viable for large swarms without exponential cost increases.</p>
+          </div>
         </div>
       )}
     </div>

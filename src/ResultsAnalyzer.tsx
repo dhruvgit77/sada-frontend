@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { simulate, type AgentConfig, PRNG } from './Simulation';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 interface ScaleResult {
   agentCount: number;
@@ -13,6 +14,9 @@ interface ScaleResult {
   pathOverhead: number;
   baselineTime: number;
   sadaTime: number;
+  baselineEnergy: number;
+  sadaEnergy: number;
+  energyReduction: number;
 }
 
 interface SensitivityResult {
@@ -21,6 +25,7 @@ interface SensitivityResult {
   success: number;
   avgPath: number;
   smoothness: number;
+  energy: number;
 }
 
 interface ParameterSweep {
@@ -127,6 +132,10 @@ export default function ResultsAnalyzer() {
       const avgBaselinePath = baselinePaths.reduce((a, b) => a + b, 0) / trialsPerCount;
       const avgSadaPath = sadaPaths.reduce((a, b) => a + b, 0) / trialsPerCount;
 
+      const baselineEnergy = (avgBaselinePath * 5) + ((avgBaselineFlips / count) * 25);
+      const sadaEnergy = (avgSadaPath * 5) + ((avgSadaFlips / count) * 25);
+      const energyReduction = ((baselineEnergy - sadaEnergy) / baselineEnergy) * 100;
+
       results.push({
         agentCount: count,
         baselineFlips: avgBaselineFlips,
@@ -138,7 +147,10 @@ export default function ResultsAnalyzer() {
         sadaAvgPath: avgSadaPath,
         pathOverhead: ((avgSadaPath - avgBaselinePath) / avgBaselinePath) * 100,
         baselineTime: 0,
-        sadaTime: 0
+        sadaTime: 0,
+        baselineEnergy,
+        sadaEnergy,
+        energyReduction
       });
 
       setStatus(`Completed ${count}-agent tests...`);
@@ -184,12 +196,17 @@ export default function ResultsAnalyzer() {
         smoothnessVals.push(smooth);
       }
 
+      const avgFlips = flips.reduce((a, b) => a + b, 0) / trials;
+      const avgPathLen = paths.reduce((a, b) => a + b, 0) / trials;
+      const energy = (avgPathLen * 5) + ((avgFlips / 6) * 25); // 6 agents
+
       results.push({
         beta,
-        flips: flips.reduce((a, b) => a + b, 0) / trials,
+        flips: avgFlips,
         success: success.reduce((a, b) => a + b, 0) / trials,
-        avgPath: paths.reduce((a, b) => a + b, 0) / trials,
-        smoothness: smoothnessVals.reduce((a, b) => a + b, 0) / trials
+        avgPath: avgPathLen,
+        smoothness: smoothnessVals.reduce((a, b) => a + b, 0) / trials,
+        energy
       });
 
       setStatus(`Tested β=${beta}...`);
@@ -298,6 +315,8 @@ export default function ResultsAnalyzer() {
                 <th style={{ border: '1px solid #ddd', padding: '8px' }}>Base Succ%</th>
                 <th style={{ border: '1px solid #ddd', padding: '8px' }}>SADA Succ%</th>
                 <th style={{ border: '1px solid #ddd', padding: '8px' }}>Avg Path Δ</th>
+                <th style={{ border: '1px solid #ddd', padding: '8px' }}>Base Energy</th>
+                <th style={{ border: '1px solid #ddd', padding: '8px' }}>SADA Energy</th>
               </tr>
             </thead>
             <tbody>
@@ -329,10 +348,49 @@ export default function ResultsAnalyzer() {
                   }}>
                     {r.pathOverhead > 0 ? '+' : ''}{r.pathOverhead.toFixed(1)}%
                   </td>
+                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>{r.baselineEnergy.toFixed(1)} Wh</td>
+                  <td style={{
+                    border: '1px solid #ddd',
+                    padding: '8px',
+                    backgroundColor: r.energyReduction > 0 ? '#dcfce7' : '#fee2e2',
+                    fontWeight: 'bold'
+                  }}>
+                    {r.sadaEnergy.toFixed(1)} Wh ({r.energyReduction > 0 ? '-' : '+'}{Math.abs(r.energyReduction).toFixed(1)}%)
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <div style={{ marginTop: '20px', display: 'flex', flexWrap: 'wrap', gap: '20px' }}>
+            <div style={{ width: '48%', minWidth: '400px', height: '300px' }}>
+              <h4>Jitter (Total Flips) vs Scalability</h4>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={scaleResults}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="agentCount" label={{ value: 'Number of Agents', position: 'insideBottom', offset: -5 }} />
+                  <YAxis label={{ value: 'Total Flips', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip />
+                  <Legend verticalAlign="top" height={36}/>
+                  <Bar dataKey="baselineFlips" name="Baseline Flips" fill="#f87171" />
+                  <Bar dataKey="sadaFlips" name="SADA Flips" fill="#34d399" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ width: '48%', minWidth: '400px', height: '300px' }}>
+              <h4>Energy Consumption vs Scalability</h4>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={scaleResults}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="agentCount" label={{ value: 'Number of Agents', position: 'insideBottom', offset: -5 }} />
+                  <YAxis label={{ value: 'Avg Energy/Agent (Wh)', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip />
+                  <Legend verticalAlign="top" height={36}/>
+                  <Bar dataKey="baselineEnergy" name="Baseline Energy" fill="#f87171" />
+                  <Bar dataKey="sadaEnergy" name="SADA Energy" fill="#34d399" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       )}
 
@@ -351,6 +409,7 @@ export default function ResultsAnalyzer() {
                 <th style={{ border: '1px solid #ddd', padding: '8px' }}>Success %</th>
                 <th style={{ border: '1px solid #ddd', padding: '8px' }}>Avg Path</th>
                 <th style={{ border: '1px solid #ddd', padding: '8px' }}>Smoothness %</th>
+                <th style={{ border: '1px solid #ddd', padding: '8px' }}>Avg Energy/Agent</th>
               </tr>
             </thead>
             <tbody>
@@ -373,10 +432,39 @@ export default function ResultsAnalyzer() {
                   }}>
                     {r.smoothness.toFixed(1)}
                   </td>
+                  <td style={{ border: '1px solid #ddd', padding: '8px' }}>{r.energy.toFixed(1)} Wh</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <div style={{ marginTop: '20px', display: 'flex', flexWrap: 'wrap', gap: '20px' }}>
+            <div style={{ width: '48%', minWidth: '400px', height: '300px' }}>
+              <h4>Jitter (Flips) vs β</h4>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={sensitivityResults.results}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="beta" label={{ value: 'β (Stability Weight)', position: 'insideBottom', offset: -5 }} />
+                  <YAxis label={{ value: 'Total Flips', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip />
+                  <Legend verticalAlign="top" height={36}/>
+                  <Line type="monotone" dataKey="flips" name="SADA Flips" stroke="#10b981" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ width: '48%', minWidth: '400px', height: '300px' }}>
+              <h4>Energy Consumption vs β</h4>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={sensitivityResults.results}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="beta" label={{ value: 'β (Stability Weight)', position: 'insideBottom', offset: -5 }} />
+                  <YAxis label={{ value: 'Avg Energy/Agent (Wh)', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip />
+                  <Legend verticalAlign="top" height={36}/>
+                  <Line type="monotone" dataKey="energy" name="SADA Energy" stroke="#8b5cf6" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -82,6 +82,20 @@ For each agent at each step:
 
 **Key Insight**: The stability penalty `β × flip_count` makes action switching costly, but only when the benefit doesn't outweigh the cost.
 
+### Complexity Analysis
+
+**Time Complexity**
+- **Single Agent Step**: $O(|A| \cdot K)$, where $|A|$ is the number of possible actions (here, 5: UP, DOWN, LEFT, RIGHT, WAIT) and $K$ is the history length. The $K$ factor comes from `computeFlipCount` which iterates through the history to count flips. Since $|A|$ is constant (5) and $K$ is typically small (e.g., 5), this is effectively $O(1)$ per agent per step.
+- **Single Simulation Step**: $O(N \cdot |A| \cdot K + N)$, where $N$ is the number of agents. The $+N$ comes from building the `occupied` set for collision detection. This simplifies to $O(N \cdot K)$.
+- **Full Simulation**: $O(T \cdot N \cdot K)$, where $T$ is the maximum number of simulation steps.
+- **Conclusion**: The algorithm scales linearly with the number of agents $O(N)$ and history size $O(K)$, making it highly efficient for real-time applications with large swarms.
+
+**Space (Memory) Complexity**
+- **Environment**: $O(G)$, where $G$ is the grid size (e.g., $20 \times 20 = 400$).
+- **Agent State**: $O(K + P)$, where $K$ is the history array and $P$ is the path trajectory array. The path array grows by 1 each step, so at the end of the simulation, it is bounded by $T$.
+- **Total Space**: $O(G + N \cdot (K + T))$.
+- **Conclusion**: Memory usage is highly efficient and scales linearly with simulation duration and agent count.
+
 ---
 
 ## Implementation Details

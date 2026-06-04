@@ -6,7 +6,8 @@ A novel approach to reduce decision jitter in multi-agent pathfinding by introdu
 
 **Problem**: Traditional multi-agent pathfinding causes *decision jitter* — agents frequently flip between actions due to small environmental changes, leading to oscillations, inefficiency, and coordination difficulty.
 
-**Solution**: SADA introduces a history-based penalty mechanism that discourages frequent action changes while maintaining near-optimal path efficiency.
+**Solution**: SADA introduces a history-based penalty mechanism that discou
+rages frequent action changes while maintaining near-optimal path efficiency.
 
 **Results**:
 - ✅ **80% reduction in decision jitter** (flips)
@@ -14,6 +15,18 @@ A novel approach to reduce decision jitter in multi-agent pathfinding by introdu
 - ✅ **>90% goal success rate** maintained
 - ✅ **40% smoother trajectories**
 - ✅ **Scales linearly** to 30+ agents
+
+## ⏱️ Complexity Analysis
+
+**Time Complexity**: 
+- **Single Agent Step**: $O(|A| \cdot K)$, where $|A|$ is the number of possible actions (here, 5) and $K$ is the history length (typically 5). This is effectively **$O(1)$** per agent per step.
+- **Single Simulation Step**: **$O(N \cdot K)$**, where $N$ is the number of agents. (Adding $N$ for the collision detection set generation gives $O(N \cdot |A| \cdot K + N)$ which simplifies to $O(N \cdot K)$).
+- **Full Simulation**: **$O(T \cdot N \cdot K)$**, where $T$ is the number of simulation steps.
+- **Conclusion**: The algorithm scales linearly with the number of agents **$O(N)$**.
+
+**Space (Memory) Complexity**: 
+- **Total Space**: **$O(G + N \cdot (K + T))$**, where $G$ is the grid size (e.g., $20 \times 20 = 400$) and $T$ is the number of timesteps.
+- **Conclusion**: Memory usage is highly efficient and scales linearly with simulation duration and agent count.
 
 ## 📊 Key Metrics
 
